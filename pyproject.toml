@@ -11,5 +11,12 @@ dependencies = [
     "transformers>=5.16.1",
 ]
 
-[tool.pyright]
+[tool.basedpyright]
+typeCheckingMode = "standard"
+reportUnknownVariableType = false
+reportUnknownArgumentType = false
 reportUnknownMemberType = false
+reportUnknownParameterType = false
+reportAny = false
+reportExplicitAny = false
+reportMissingTypeStubs = false
