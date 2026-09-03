@@ -1,0 +1,82 @@
+{
+  "_meta": {
+    "schema_version": "1.1.0",
+    "purpose": "Fixed prompt set for cross-runtime latency and throughput benchmarking.",
+    "changelog": [
+      "1.1.0 - Replaced the no-system-prompt policy with an explicitly specified minimal system prompt. Rationale: chat templates insert model-specific defaults when none is given, which silently changes prompt_tokens across runtimes. Fixing the string is what makes comparison valid, not omitting it.",
+      "1.0.0 - Initial frozen set."
+    ],
+
+    "system_prompt": {
+      "text": "You are a helpful assistant.",
+      "measured_tokens": null,
+      "policy": "Every runtime MUST pass this exact string explicitly as the system message. Never rely on a runtime's or chat template's default, which differs across models and runtimes and would silently change prompt_tokens. This value is the single source of truth: hf_baseline.py, hf_bench.py and bench-memory.sh all read it from here rather than hardcoding it.",
+      "rationale": "Kept short so it adds few tokens to every case and does not collapse the short end of the length spectrum. Kept stylistically neutral, with no instruction about output length, format or tone, so that it does not steer generation and confound the measurement. English only, matching the user prompts, because tokenizer efficiency differs by language.",
+      "verification": "Compare the token count of a prompt with and without this system message. The difference should equal measured_tokens. A difference of zero means the template was already inserting a default of the same length; a larger difference suggests the message is being inserted twice."
+    },
+
+    "policy": {
+      "frozen": true,
+      "rules": [
+        "Existing prompt text is immutable. Never edit the 'text' field of an existing id, including the system prompt.",
+        "Additions only. New cases get new ids appended to the array.",
+        "Removals are forbidden. Deprecate with 'active': false instead, so historical CSV rows stay interpretable.",
+        "Any change to this file bumps schema_version, is added to changelog, and is recorded in the CSV 'notes' field of affected runs.",
+        "'measured_tokens' is tokenizer-specific and MUST be re-measured when the model family changes. Re-measuring is not a violation of the freeze; editing 'text' is."
+      ]
+    },
+
+    "design_rationale": {
+      "length_spectrum": "Prompt lengths follow a roughly logarithmic scale (16 / 64 / 256 / 1024) because prefill cost is not linear in sequence length. Attention is quadratic in principle, and cache and memory-bandwidth effects introduce further non-linearity. Equal spacing would under-sample the region where the curve bends.",
+      "content_neutrality": "Prompt content does not meaningfully affect decode throughput. Only token count does. The set therefore targets a length spectrum, not topical coverage.",
+      "system_prompt_is_fixed_not_absent": "See _meta.system_prompt. The goal is not to minimise the system prompt but to make it identical everywhere. target_tokens below count the user prompt only; measured_tokens count the fully templated input including the system message and generation prompt.",
+      "no_output_length_instructions": "Prompts never ask for a specific output length. Output length is controlled by min_new_tokens / max_new_tokens so that tok/s is comparable across runtimes.",
+      "english_only": "Tokenizer efficiency differs by language. Mixing languages would decouple character count from token count and blur comparisons. Non-English behaviour is a separate experiment, not part of this set.",
+      "deterministic_content": "No dates, no randomness, no external references, no instructions that depend on world state. The set must produce identical tokenization years from now.",
+      "natural_long_text": "The long-context case uses continuous prose rather than a repeated string. Repeated text produces degenerate attention patterns and unrepresentative cache behaviour."
+    },
+
+    "measurement_note": "measured_tokens are placeholders. Measure them yourself with the target tokenizer, applying the chat template with the system message above and add_generation_prompt=True, then write the real values back. Do not trust target_tokens as data.",
+
+    "measured_with": {
+      "model_id": null,
+      "tokenizer_version": null,
+      "measured_at": null
+    }
+  },
+
+  "prompts": [
+    {
+      "id": "p16",
+      "active": true,
+      "target_tokens": 16,
+      "measured_tokens": null,
+      "category": "short_question",
+      "text": "Explain what a KV cache is in transformer inference."
+    },
+    {
+      "id": "p64",
+      "active": true,
+      "target_tokens": 64,
+      "measured_tokens": null,
+      "category": "technical_explanation",
+      "text": "A team is deciding between running a language model in half precision and running a four-bit quantized version of the same model on a single workstation. Describe the trade-offs they should weigh, covering memory footprint, decoding speed, and output quality, and explain which factor usually dominates on hardware with limited memory bandwidth."
+    },
+    {
+      "id": "p256",
+      "active": true,
+      "target_tokens": 256,
+      "measured_tokens": null,
+      "category": "passage_analysis",
+      "text": "Read the following notes and explain the reasoning behind the design choice they describe.\n\nAutoregressive decoding generates one token at a time. Each step must read the full set of model weights from memory in order to compute a single token of output. This makes the decode phase memory-bandwidth bound rather than compute bound on most consumer hardware, because the arithmetic per byte loaded is very low. The prefill phase behaves differently: the entire input sequence is processed in parallel, so arithmetic intensity is high and the phase is closer to compute bound. This asymmetry explains why the two phases are usually reported as separate numbers. It also explains why quantization tends to improve decode throughput more than it improves prefill throughput, since reducing the size of the weights directly reduces the number of bytes that must be moved per generated token. A further consequence is that batching multiple requests together improves aggregate throughput considerably during decode, because the weights are read once and amortized across the batch, while the benefit during prefill is smaller. Systems that serve many concurrent users therefore behave very differently from systems that serve a single interactive session, and a benchmark that measures only one of these regimes will mislead anyone planning for the other."
+    },
+    {
+      "id": "p1024",
+      "active": true,
+      "target_tokens": 1024,
+      "measured_tokens": null,
+      "category": "long_context_review",
+      "text": "The following is an internal design note for a small inference service. Read it and identify the technical risks it contains.\n\nThe service runs a single instruction-tuned language model on one workstation with sixteen gigabytes of unified memory. The machine is shared between the inference runtime, a vector store used for retrieval, a small web dashboard, and the developer's ordinary desktop applications. There is no second host and no failover. When the machine is restarted, everything comes back up through a single startup script that loads the model weights eagerly before any traffic is accepted.\n\nModel weights are stored on the local disk in a quantized format. The startup script loads them into memory once and keeps them resident for the lifetime of the process. This was chosen deliberately, because loading the weights takes long enough that doing it on demand would make the first request of each session unacceptably slow. The consequence is that the memory occupied by the weights is unavailable to everything else for as long as the service is running, regardless of whether any requests are arriving. During periods of no traffic this is pure waste, but the team accepted it in exchange for predictable latency.\n\nThe retrieval component maintains an index over a corpus of internal documents. The index is held in memory for speed. Its size grows with the corpus, and the corpus grows continuously as documents are added. No one has established an upper bound for it. The team has an informal understanding that the corpus is small enough not to matter, but this understanding has never been checked against measurements, and the growth rate has never been recorded.\n\nRequests arrive through a simple queue. The queue accepts requests without limit and hands them to the runtime one at a time. There is no admission control and no timeout. If a request produces an unusually long response, every request behind it waits. If a client disconnects while waiting, the request is still processed to completion, because the queue has no mechanism for cancellation. The team has observed occasional periods where the dashboard becomes unresponsive, and has attributed these to network problems, but no measurement has been taken during such a period to confirm this.\n\nThe context window is configured at a fixed size chosen when the service was first deployed. Longer inputs are truncated silently from the beginning. Nothing is logged when truncation occurs. Users have occasionally reported that the system appears to ignore information they provided, and these reports have not been reproduced, because no record exists of which requests were truncated or by how much.\n\nMemory pressure is not monitored. The team relies on the operating system to manage memory and assumes that if memory were exhausted the failure would be obvious. In practice the operating system compresses inactive pages and eventually swaps to disk, and both of these degrade performance gradually rather than failing outright. A slow request is therefore indistinguishable, from the outside, from a request that is competing for memory with a background process.\n\nPerformance was measured once, shortly after the initial deployment, using a handful of manually issued requests. The numbers from that session are quoted in the project documentation as the expected performance of the system. No measurement has been taken since. The model has been changed twice in the meantime, the quantization format once, and the runtime version several times. The documentation has not been updated, and no record exists of which configuration produced the quoted numbers.\n\nLogging is limited to errors. Successful requests are not recorded, so there is no history of how long requests take, how long inputs are, or how the distribution of either has changed over time. When the team wants to know whether a change improved performance, the only available method is to try it and form an impression.\n\nThe team plans to add a second model for a specialized task. The current plan is to load both models at startup, using the same eager loading approach, on the same machine. No estimate has been made of the combined memory requirement, and no decision has been reached about what should happen if the combined requirement exceeds available memory."
+    }
+  ]
+}
