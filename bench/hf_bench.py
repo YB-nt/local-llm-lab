@@ -8,8 +8,8 @@ import datetime
 import json
 import os
 import platform
+import re
 import resource
-import socket
 import subprocess
 import time
 import uuid
@@ -104,6 +104,45 @@ def load_model(model_id: str, dtype: str, device: str):
     tokenizer = AutoTokenizer.from_pretrained(model_id)
 
     return model, tokenizer
+
+
+HOST_LABEL_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hostlabel.sh")
+
+
+def get_host_label() -> str:
+    """CSV의 host 컬럼에 쓸 익명 머신 라벨을 구한다.
+
+    Returns:
+        str: 공백·쉼표가 `_`로 치환된 단일 CSV 토큰 (예: "apple-m4-16gb").
+
+    Note:
+        - 해석 순서: BENCH_HOST 환경변수 → bench/hostlabel.sh 실행 결과 → "unknown-host".
+        - socket.gethostname()을 쓰지 않는다. 실제 hostname에는 사용자 실명이
+          들어갈 수 있고(예: "YooYeongBin-Macmini.local") 이 레포는 제출 시점에
+          public으로 전환된다.
+        - bench-memory.sh와 **같은 스크립트**를 호출한다. 라벨 생성 로직을 파이썬으로
+          재구현하면 두 런타임의 host 값이 미묘하게 달라져 런타임 간 조인이 깨진다.
+        - 실패 시 hostname으로 폴백하지 않는다. 익명화가 조용히 풀리는 것보다
+          "unknown-host"가 낫다 — 경고는 로그로 남긴다.
+    """
+    label = os.getenv("BENCH_HOST", "").strip()
+
+    if not label:
+        try:
+            label = subprocess.run(
+                [HOST_LABEL_SCRIPT], capture_output=True, text=True, check=True
+            ).stdout.strip()
+        except (subprocess.CalledProcessError, OSError) as exc:
+            logger.warning(
+                f"{HOST_LABEL_SCRIPT} 실행 실패 ({exc}) — host='unknown-host'로 기록한다. "
+                "BENCH_HOST 환경변수로 직접 지정할 수 있다."
+            )
+            label = ""
+
+    if not label:
+        label = "unknown-host"
+
+    return re.sub(r"[\s,]+", "_", label)
 
 
 def get_git_state() -> GitState:
@@ -339,6 +378,25 @@ def run_one_prompt(
     return return_dict
 
 
+def build_notes(user_notes: str) -> str:
+    """notes 컬럼 값을 만든다.
+
+    Args:
+        user_notes (str): CLI --notes로 받은 문자열. `;`로 구분된 key=value 토큰.
+
+    Returns:
+        str: 정규화된 notes 문자열.
+
+    Note:
+        - 규약은 `;`로 구분된 토큰이며 **쉼표·개행 금지**다. CSV 쿼팅 없이
+          안전하게 append하기 위한 제약으로, bench-memory.sh도 같은 규약을 쓴다.
+        - 런타임에 의해 결정되는 사실(ttft_ms의 측정 방식 등)은 여기 넣지 않는다.
+          `runtime` 컬럼으로 이미 판별되므로 중복이다.
+    """
+    tokens = [t.strip() for t in user_notes.split(";") if t.strip()]
+    return ";".join(re.sub(r"[,\r\n]+", "_", t) for t in tokens)
+
+
 def write_row(row: dict, csv_path: str, fieldnames: list[str] = FIELDNAMES) -> None:
     """완성된 한 행을 CSV에 append한다.
 
@@ -377,6 +435,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output", default="results/bench.csv")
     parser.add_argument("--gen-tokens", type=int, default=128)
     parser.add_argument("--n-ctx", type=int, default=2048)
+    parser.add_argument(
+        "--notes",
+        default="",
+        help="notes 컬럼에 넣을 태그. ';'로 구분된 key=value 형식, 쉼표 금지 "
+        "(예: 'quiet_env;batch=2')",
+    )
     parser.add_argument("--no-sync", action="store_true")
     parser.add_argument("--no-warmup", action="store_true")
 
@@ -402,9 +466,12 @@ def main() -> None:
     system_prompt, active_prompts = load_prompts(args.prompts_path)
     model, tokenizer = load_model(args.model_id, args.dtype, args.device)
 
+    session_id = str(uuid.uuid4())
+    cond = "no_sync" if args.no_sync else "no_warmup" if args.no_warmup else "baseline" # no_sync / no_warmup 모두 선택은 불가능함
     git_commit, dirty_flag = get_git_state()
-    host = socket.gethostname()
+    host = get_host_label()
     user_os = platform.system()
+    notes = build_notes(args.notes)
     sync = not (args.no_sync)
 
     logger.info(
@@ -424,9 +491,11 @@ def main() -> None:
             sync=sync,
         )
         row["run_id"] = uuid.uuid4()
+        row['session_id'] = session_id
         row["timestamp"] = datetime.datetime.now(tz).isoformat()
         row["git_commit"] = git_commit
         row["dirty_flag"] = dirty_flag
+        row["cond"] = cond
         row["runtime"] = "hf"
         row["runtime_version"] = runtime_version
         row["model_id"] = args.model_id
@@ -436,7 +505,7 @@ def main() -> None:
         row["n_ctx"] = args.n_ctx
         row["host"] = host
         row["os"] = user_os
-        row["notes"] = ""
+        row["notes"] = notes
 
         write_row(row, args.output, FIELDNAMES)
         logger.info(
