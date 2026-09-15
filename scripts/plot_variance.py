@@ -90,6 +90,64 @@ def load_filtered_df(
     return df
 
 
+# 런타임 간 '구성'이 달라 같은 축에 올리면 안 되는 지표.
+# 값은 (차단할지, 사유). 근거는 docs/bench-schema.md의 해당 컬럼 항목.
+CROSS_RUNTIME_UNSAFE: dict[str, tuple[bool, str]] = {
+    "ttft_ms": (
+        True,
+        (
+            "HF는 max_new_tokens=1 별도 호출의 wall-clock(prefill + 디코딩 1스텝 + 프레임워크 "
+            "오버헤드)이고 Ollama는 prompt_eval_duration(prefill만)이다. 같은 축에 올리면 "
+            "정의 차이를 엔진 성능 차이로 오독한다 — TTFT는 런타임 내부의 프롬프트 길이 "
+            "스케일링만 본다."
+        ),
+    ),
+    "peak_rss_gb": (
+        False,
+        (
+            "HF는 ru_maxrss(프로세스 시작 이후 누적 최대), Ollama는 생성 구간 샘플링 "
+            "최댓값이다. 절대값 직접 비교는 피하고 runtime_alloc_gb와 함께 읽을 것."
+        ),
+    ),
+}
+
+
+def assert_metric_comparable(df: pd.DataFrame, metric: str) -> None:
+    """여러 런타임이 섞인 데이터로 비교 불가 지표를 그리는 것을 막는다.
+
+    Args:
+        df (pd.DataFrame): 필터가 모두 적용된 데이터프레임.
+        metric (str): 그릴 지표 컬럼명.
+
+    Returns:
+        None
+
+    Raises:
+        ValueError: metric이 런타임 간 비교 불가이고 df에 런타임이 2개 이상일 때.
+
+    Note:
+        - 데이터가 한 런타임뿐이면 아무 것도 하지 않는다. HF 단독 데이터에는 영향 없음.
+        - 차단(ValueError) 대신 경고만 하는 지표도 있다 — CROSS_RUNTIME_UNSAFE의 첫 번째 값.
+        - 이 가드가 필요한 이유: --metric 기본값이 ttft_ms이고 Ollama 행도 cond=baseline
+          이라, 가드가 없으면 기본 호출에서 두 런타임이 조용히 한 그래프에 섞인다.
+    """
+    if metric not in CROSS_RUNTIME_UNSAFE:
+        return
+
+    runtimes = sorted(df["runtime"].dropna().unique().tolist())
+    if len(runtimes) < 2:
+        return
+
+    block, reason = CROSS_RUNTIME_UNSAFE[metric]
+    message = f"{metric}: 서로 다른 런타임 {runtimes}이 한 그래프에 섞였습니다.\n  {reason}"
+
+    if block:
+        raise ValueError(
+            f"{message}\n  --runtime {runtimes[0]} 처럼 하나만 지정해서 다시 실행하세요."
+        )
+    print(f"[warn] {message}")
+
+
 def discover_groups(df: pd.DataFrame, group_col: str) -> list[str]:
     """group_col 기준으로 존재하는 그룹 값을 전부 찾는다. notes 빈 문자열은 '(no tag)'로 표시."""
     if group_col == "notes":
@@ -197,6 +255,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
              "필터링된 데이터에 존재하는 모든 조건을 포함 (사전 필터로만 사용됨)",
     )
     parser.add_argument(
+        "--runtime", default="all",
+        help='콤마로 구분된 런타임 목록, 예: hf 또는 hf,ollama. "all"(기본값)이면 필터 없음. '
+             "ttft_ms는 런타임 간 정의가 달라 두 개 이상 섞이면 오류로 막는다",
+    )
+    parser.add_argument(
         "--group-by", default="cond", choices=["cond", "notes"],
         help="선/평균선을 무엇 기준으로 나눌지. cond(기본): baseline/no_sync/no_warmup별로 색 구분. "
              "notes: notes 태그별로 색 구분 (예: quiet_env 배치 vs 기존 데이터를 같은 cond 안에서 비교)",
@@ -248,6 +311,15 @@ def main() -> None:
             f"notes_contains={args.notes_contains}, notes_excludes={args.notes_excludes})."
         )
 
+    # --runtime도 --cond와 같은 성격의 사전 필터
+    if args.runtime != "all":
+        runtime_list = [r.strip() for r in args.runtime.split(",") if r.strip()]
+        before = len(df)
+        df = df.loc[df["runtime"].isin(runtime_list)]
+        print(f"[info] --runtime {runtime_list} 적용: {before} → {len(df)}행")
+        if df.empty:
+            raise ValueError(f"runtime={runtime_list} 필터 후 남은 행이 없습니다.")
+
     # --cond는 group-by 값과 무관하게 항상 사전 필터로 적용
     if args.cond != "all":
         cond_list = [c.strip() for c in args.cond.split(",") if c.strip()]
@@ -257,6 +329,9 @@ def main() -> None:
         if df.empty:
             raise ValueError(f"cond={cond_list} 필터 후 남은 행이 없습니다.")
 
+    # 모든 필터가 끝난 뒤에 검사한다 — --runtime으로 이미 하나만 남았으면 통과해야 하므로
+    assert_metric_comparable(df, args.metric)
+
     groups = discover_groups(df, args.group_by)
     print(f"[info] --group-by {args.group_by} 기준 발견된 그룹: {groups}")
 
@@ -264,7 +339,13 @@ def main() -> None:
 
     sessions_by_group = {g: load_sessions(df, args.group_by, g, args.metric) for g in groups}
 
-    title = f"{args.metric} — {' vs '.join(groups)} ({args.model_id}, {args.dtype})"
+    # 런타임을 제목에 넣어 PNG만 봐도 어느 런타임 데이터인지 알 수 있게 한다
+    runtimes = sorted(df["runtime"].dropna().unique().tolist())
+    runtime_label = "+".join(runtimes) if runtimes else "?"
+    title = (
+        f"{args.metric} — {' vs '.join(groups)} "
+        f"({runtime_label}, {args.model_id}, {args.dtype})"
+    )
 
     if args.mode == "summary":
         plot_summary_mode(sessions_by_group, args.metric, args.output, title)
