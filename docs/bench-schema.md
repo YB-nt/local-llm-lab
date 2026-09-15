@@ -3,7 +3,7 @@
 > local-llm-lab 벤치마크 결과(`results/bench.csv`)의 단일 진실 공급원.
 > 새 런타임(llama.cpp, MLX)을 추가할 때도 이 문서를 먼저 갱신한다.
 
-- **schema_version**: 1.0.1
+- **schema_version**: 1.2.0
 - **대상 스크립트**: `bench/hf_bench.py`, `bench/bench-memory.sh`
 
 ---
@@ -14,10 +14,12 @@
 
 | 컬럼 | 타입 | 설명 |
 |---|---|---|
-| `run_id` | string | 이 실행의 고유 식별자 (UUID 또는 순번) |
+| `run_id` | string | 이 행(프롬프트 1개)의 고유 식별자 (UUID) |
+| `session_id` | string | 같은 프로세스 실행에서 나온 행들을 묶는 식별자 (프로세스당 1회 생성, 그 실행의 모든 행에 동일하게 채움) |
 | `timestamp` | ISO8601 | 실행 시각 |
 | `git_commit` | string | 실행 당시 커밋 SHA (short). git 레포가 아니면 `nogit` |
 | `dirty_flag` | boolean | 커밋 이후 로컬 변경 여부 (`git diff --quiet`). **`git_commit`과 분리된 컬럼** — SHA는 항상 순수하게 유지 |
+| `cond` | enum | 측정 조건 태그. `baseline` \| `no_sync` \| `no_warmup`. 1-3 검증 실험에서 같은 `bench.csv` 안의 행들을 조건별로 필터링하기 위함. **주의: 현재는 단일 값이라 `no_sync`+`no_warmup` 동시 적용 조건은 표현 불가 — 필요해지면 `no_sync_no_warmup`처럼 값을 추가하거나 `sync`/`warmup` 두 개의 별도 boolean 컬럼으로 다시 쪼개는 걸 고려** |
 
 ### 실행 환경
 
@@ -43,9 +45,40 @@
 
 | 컬럼 | 타입 | 설명 | 정의 |
 |---|---|---|---|
-| `ttft_ms` | float | Time To First Token | `max_new_tokens=1` 런으로 근사. **모델 로딩 시간(`load_ms`) 제외** |
+| `ttft_ms` | float | Time To First Token | **런타임마다 구성이 다르다 — 아래 주의 필독.** 모델 로딩 시간(`load_ms`)은 양쪽 다 제외 |
 | `decode_tok_s` | float | 디코딩 속도 | `gen_tokens / (디코딩 소요시간)`. **prompt 처리 시간 제외한 순수 디코딩 구간만** |
 | `total_s` | float | 전체 소요 시간(초) | TTFT + 디코딩 전체 |
+
+#### ⚠ `ttft_ms`는 런타임 간 비교에 쓰지 않는다 — 결정 완료
+
+| 런타임 | 실제로 재는 것 |
+|---|---|
+| `hf` | `max_new_tokens=1` **별도 호출의 wall-clock** = prefill + 디코딩 1스텝 + 프레임워크 오버헤드 |
+| `ollama` | `prompt_eval_duration` = **prefill만** |
+
+디코딩 1스텝과 호출 오버헤드만큼 Ollama 값이 구조적으로 작다. 프롬프트가 짧을수록
+(`p16`) 전체 TTFT 대비 이 격차의 비중이 크고, `p1024`로 갈수록 prefill이 지배해서 줄어든다.
+
+**결정:** 각 런타임은 자기가 직접 보고하는 값을 그대로 쓴다. 합성값
+(`prompt_eval_duration + eval_duration/eval_count` 등)으로 억지로 맞추지 않는다 —
+첫 토큰의 디코딩 시간은 평균과 다르고, 만들어낸 값이라 근거가 약해진다.
+
+대신 **분석 범위를 좁힌다**:
+
+- ✅ 런타임 **내부**의 프롬프트 길이 스케일링 (`p16` → `p1024`에서 TTFT가 어떻게 자라는지)
+- ✅ 같은 런타임 안에서의 조건 비교 (`cond`, `dtype`, `quant`별)
+- ❌ 런타임 **간** TTFT 절대값·순위 비교
+
+**강제 장치:** `scripts/plot_variance.py`의 `assert_metric_comparable()`이 `ttft_ms`를
+그릴 때 데이터에 런타임이 2개 이상이면 `ValueError`로 중단한다. `--runtime hf`처럼
+하나를 지정해야 한다. 문서 규칙만으로는 새는데, `--metric` 기본값이 `ttft_ms`이고
+Ollama 행도 `cond=baseline`이라 가드가 없으면 기본 호출에서 조용히 섞인다.
+
+`peak_rss_gb`도 런타임별 구성이 다르지만(HF는 `ru_maxrss` 누적 최대, Ollama는 샘플링
+최댓값) 차단이 아니라 경고만 한다.
+
+> 이 정의 차이는 약점이 아니라 측정 설계의 일부다. "TTFT를 런타임 간에 비교하지 않은
+> 이유"는 그 자체로 설명 가치가 있으니 리포트에 남긴다.
 
 ### 메모리
 
@@ -58,7 +91,7 @@
 
 | 컬럼 | 타입 | 설명 |
 |---|---|---|
-| `host` | string | 실행 머신 이름 |
+| `host` | string | **익명** 머신 라벨 (예: `apple-m4-16gb`). 실제 hostname을 쓰지 않는다 — 5절 참고 |
 | `os` | string | `uname -s` 결과 |
 | `notes` | string | 이상 케이스, 수동 메모. 스키마 밖 값은 여기에 JSON으로 압축 가능 |
 
@@ -125,7 +158,7 @@ v1에서 "제외"로 잘못 분류했던 걸 바로잡은 것.
 | `gen_tokens` | `gen_tokens` | 그대로 |
 | `prompt_tokens` | `prompt_tokens` | 그대로. **1-5에서 HF 실측치와 일치 검증 필수** |
 | `total_ms` | `total_s` | `/ 1000` |
-| `num_ctx` | `n_ctx` | 그대로 |
+| `num_ctx` | `n_ctx` | 정수 필수. **HF도 빈 값이 아니다** — `args.n_ctx`(기본 2048)를 쓴다. 단 의미가 다름: HF는 토크나이저 truncation 상한(메모리 할당과 무관), Ollama는 KV 캐시 선할당 크기. 같은 값으로 맞춰 쓰되 메모리 컬럼 해석 시 이 비대칭을 함께 읽을 것 |
 | `model_vram_mb` | `runtime_alloc_gb` | **v1에서 제외로 잘못 분류.** Ollama 자체 보고 GPU 할당량 — HF의 `driver_allocated_memory()`와 개념적으로 대응 |
 | `processor` | `device` | **v1에서 제외로 잘못 분류.** GPU/CPU 실행 여부 — HF의 `device`(mps/cpu) 자리를 채워야 함 |
 | `ollama_rss_baseline/loaded_mb` | `peak_rss_gb` | 로드 전/후 **스냅샷**이라 디코딩 중 실제 peak을 못 잡을 수 있음 (4절 하단 재확인 필요 항목 참고) |
@@ -145,9 +178,9 @@ v1에서 "제외"로 잘못 분류했던 걸 바로잡은 것.
 
 | 원본 컬럼 | 통합 컬럼 | 확인할 것 |
 |---|---|---|
-| `tokens_per_sec` | `decode_tok_s` | `eval_ms`(순수 디코딩 시간, Ollama API의 `eval_duration`)를 분모로 쓰는지 확인. 맞다면 HF `decode_tok_s`와 같은 정의라 이름만 바꾸면 됨. `total_ms` 기반이면 재계산 필요 |
-| `prompt_eval_ms` | `ttft_ms` | `load_ms`(모델 로딩)가 섞여 들어가는지. `keep_alive` 설정에 따라 매 요청마다 로드가 발생하면 TTFT가 부풀려짐 |
-| `ollama_rss_baseline/loaded_mb` | `peak_rss_gb` | 로드 전/후 **스냅샷**이라 디코딩 중 실제 peak(특히 `p1024`처럼 KV 캐시가 커지는 케이스)를 못 잡을 수 있음. 이름 그대로 쓸지, "post-load RSS"로 정의를 재확인할지 결정 필요 |
+| `tokens_per_sec` | `decode_tok_s` | **해소.** `eval_count / eval_duration`으로 순수 디코딩 구간을 쓰고 있어 개념적으로 동일. 분자 비대칭(HF는 2~N번째, Ollama는 1~N번째 토큰 평균)은 N=128에서 1/N ≈ 0.8% 수준이라 그대로 두고 문서화만 — `ollama-adapter-spec.md` §3-E |
+| `prompt_eval_ms` | `ttft_ms` | **해소(정의 차이 확정).** prefill-only이며 HF와 구성이 다르다. 런타임 간 비교를 하지 않는 것으로 결정 — 1절 `ttft_ms` 주의 항목 참고. `load_ms` 혼입 여부는 `p1024` 실측으로 별도 확인 (`ollama-adapter-spec.md` §4-2, §5) |
+| `ollama_rss_baseline/loaded_mb` | `peak_rss_gb` | **해소 예정.** 스냅샷이라 실제 peak을 못 잡는 게 확인됨. 생성 구간 샘플링으로 바꾸기로 결정 — `ollama-adapter-spec.md` §3-F. HF의 `ru_maxrss`도 로드 시점에 정점을 찍어 사실상 "로드 후 정착 메모리"임이 실측으로 확인됨 |
 
 ---
 
@@ -167,7 +200,35 @@ v1에서 "제외"로 잘못 분류했던 걸 바로잡은 것.
 
 ---
 
+## 5. `host` 컬럼 규약
+
+이 레포는 제출 시점에 public으로 전환된다. `host`에 실제 머신 이름이 들어가면
+사용자 실명이 그대로 공개된다.
+
+**규약:** 모든 런타임이 `bench/hostlabel.sh` **한 곳**에서 라벨을 얻는다.
+해석 순서는 `BENCH_HOST` 환경변수 → `bench/hostlabel.sh` 실행 결과 → `unknown-host`.
+
+- 라벨 형식: `<chip>-<ram>gb` (예: `apple-m4-16gb`). 공백·쉼표는 `_`로 치환해 CSV 단일 토큰 유지
+- 실패 시 **hostname으로 폴백하지 않는다.** 익명화가 조용히 풀리는 것보다 `unknown-host`가 낫다
+- 라벨 생성 로직을 런타임별로 재구현하지 않는다. 값이 미묘하게 달라지면 런타임 간 조인이 깨진다
+- `bench-memory.sh`는 라벨이 빈 문자열이면 **즉시 종료**한다 (과거에 경로 오류로
+  `host`가 빈 값인 채 수집된 적이 있다)
+
+> `hostlabel.sh`는 `scripts/`에서 `bench/`로 옮겼다. 호출자(`hf_bench.py`,
+> `bench-memory.sh`)가 모두 `bench/`에 있어 경로 해석이 단순해지고, 각자
+> 자기 파일 기준 상대 경로로 찾을 수 있다.
+
+---
+
 ## Changelog
 
 - `1.0.0` — 초기 통합 스키마 확정. `quant`/`dtype` 정규화·필터링 정책 결정 완료.
 - `1.0.1` — Ollama 30개 원본 컬럼 전체 재감사. `model_vram_mb`→`runtime_alloc_gb`, `processor`→`device` 매핑 확정 (v1에서 제외로 오분류했던 것 정정). `run` 컬럼 제외 확정. `tokens_per_sec`/`prompt_eval_ms`/`ollama_rss_*` 세 항목은 여전히 검증 필요 상태로 남음.
+- `1.2.0` — **컬럼 구성 변경 없음(24개 유지), 의미·규약만 확정.** ① `ttft_ms`의 런타임별
+  정의 차이를 명시하고 런타임 간 비교를 금지 (1절 주의 항목). `plot_variance.py`에
+  `assert_metric_comparable()` 가드로 강제. ② `host` 컬럼 규약 신설 (5절) —
+  `hostlabel.sh`를 `scripts/`→`bench/`로 이동, `hf_bench.py`가 `socket.gethostname()`
+  대신 이 스크립트를 호출하도록 변경. ③ 3절의 검증 필요 3항목에 결론 기재,
+  `num_ctx → n_ctx`의 "HF는 빈 값" 오기 정정. **하위 호환 유지** — 기존
+  `bench.csv`를 그대로 이어서 쓸 수 있다 (단 `host` 값은 변경 시점 전후로 달라진다)
+- `1.1.0` — `session_id`, `cond` 컬럼 추가 (22→24개). 1-3 검증 실험에서 여러 프로세스 실행을 묶고(`session_id`) 측정 조건을 구분(`cond`)하기 위함 — 기존에는 `notes`에 문자열로 태깅하는 방식을 검토했으나 쿼리 편의성을 위해 정식 컬럼으로 분리. **하위 호환 깨짐**: 이 버전 이전에 수집된 `bench.csv`(22컬럼)는 새 헤더와 컬럼 수가 안 맞으므로 새 파일로 다시 시작함 (기존 데이터는 `docs/hf-notes.md`의 베이스라인 변동폭 섹션에 분석·보존됨).
