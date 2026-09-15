@@ -33,3 +33,4 @@ local-llm-lab/
 
 - 플랫폼: macOS
 - 의존성: `bash`, `curl`, `jq`, 실행 중인 Ollama 서버(`ollama serve` / Ollama.app)
+
