@@ -157,8 +157,18 @@ unload_model() {
 # ----------------------------------------------------------------------------
 curl -sf "$HOST/api/version" >/dev/null || { echo "ERROR: Ollama not reachable at $HOST" >&2; exit 1; }
 OLLAMA_VER=$(curl -s "$HOST/api/version" | jq -r '.version // "?"')
-HOSTNAME_S="${BENCH_HOST:-$("$(dirname "$0")/hostlabel.sh")}"
+# host 라벨은 bench/hostlabel.sh 한 곳에서만 생성한다 — hf_bench.py도 같은 스크립트를
+# 호출하므로 두 런타임의 host 값이 문자열까지 일치하고 런타임 간 조인이 가능하다.
+# 실제 hostname은 쓰지 않는다 (사용자 실명이 들어갈 수 있고 이 레포는 public으로 전환된다).
+HOSTLABEL_SH="$(dirname "$0")/hostlabel.sh"
+HOSTNAME_S="${BENCH_HOST:-$("$HOSTLABEL_SH" 2>/dev/null)}"
 HOSTNAME_S=$(printf '%s' "$HOSTNAME_S" | sed 's/[[:space:],]\{1,\}/_/g')   # keep CSV single-token
+# 빈 값을 조용히 넘기지 않는다 — 스크립트 경로가 틀려 host가 빈 문자열로 쌓인 적이 있다.
+[ -z "$HOSTNAME_S" ] && {
+  echo "ERROR: host label is empty ($HOSTLABEL_SH 실행 실패)." >&2
+  echo "       BENCH_HOST 환경변수로 지정하거나 hostlabel.sh 경로를 확인하세요." >&2
+  exit 1
+}
 MEM_TOTAL_MB=$(( $(sysctl -n hw.memsize) / 1048576 ))
 
 mkdir -p "$(dirname "$CSV")" "$(dirname "$LOG")"
