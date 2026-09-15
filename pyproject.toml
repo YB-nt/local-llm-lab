@@ -6,9 +6,13 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "accelerate>=1.14.0",
+    "load-dotenv>=0.1.0",
     "loguru>=0.7.3",
+    "matplotlib>=3.11.2",
+    "pandas>=3.0.5",
     "torch>=2.13.0",
     "transformers>=5.16.1",
+    "uuid>=1.30",
 ]
 
 [tool.basedpyright]
