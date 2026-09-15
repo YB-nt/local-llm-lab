@@ -118,7 +118,7 @@ def get_host_label() -> str:
     Note:
         - 해석 순서: BENCH_HOST 환경변수 → bench/hostlabel.sh 실행 결과 → "unknown-host".
         - socket.gethostname()을 쓰지 않는다. 실제 hostname에는 사용자 실명이
-          들어갈 수 있고(예: "YooYeongBin-Macmini.local") 이 레포는 제출 시점에
+          들어갈 수 있고, 이 레포는 제출 시점에
           public으로 전환된다.
         - bench-memory.sh와 **같은 스크립트**를 호출한다. 라벨 생성 로직을 파이썬으로
           재구현하면 두 런타임의 host 값이 미묘하게 달라져 런타임 간 조인이 깨진다.
