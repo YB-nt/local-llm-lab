@@ -1,0 +1,124 @@
+schema_version: 1.0.0
+qwen2.5-0.5b-instruct:
+  source:
+    hf_repo: Qwen/Qwen2.5-0.5B-Instruct
+    hf_revision: 7ae557604adf67be50417f59c2c2f167def9a775
+    native_dtype: bf16
+    parameters: 494032768
+  variants:
+    fp16:
+      relation: same_weights
+      note: 원본 bf16을 양쪽 모두 fp16으로 캐스팅
+      runtimes:
+        hf:
+          model_id: Qwen/Qwen2.5-0.5B-Instruct
+          dtype: fp16
+          revision: 7ae557604adf67be50417f59c2c2f167def9a775
+        ollama:
+          model_id: qwen2.5:0.5b-instruct-fp16
+          dtype: fp16
+          digest: c82efd44bfdceead1596114a378e8c9f4f3c4509e98af0c034e1dcd5396f0547
+      evidence:
+        verified_at: '2026-09-15T23:58:04.258739+09:00'
+        captured_by: scripts/capture_model_identity.py@73441b8
+        architecture:
+          match: true
+          compared:
+            num_hidden_layers:
+              hf: 24
+              ollama: 24
+              ollama_field: qwen2.block_count
+              match: true
+            hidden_size:
+              hf: 896
+              ollama: 896
+              ollama_field: qwen2.embedding_length
+              match: true
+            num_attention_heads:
+              hf: 14
+              ollama: 14
+              ollama_field: qwen2.attention.head_count
+              match: true
+            num_key_value_heads:
+              hf: 2
+              ollama: 2
+              ollama_field: qwen2.attention.head_count_kv
+              match: true
+            intermediate_size:
+              hf: 4864
+              ollama: 4864
+              ollama_field: qwen2.feed_forward_length
+              match: true
+            rope_theta:
+              hf: 1000000.0
+              ollama: 1000000
+              ollama_field: qwen2.rope.freq_base
+              match: true
+          unavailable_fields: []
+        tokenization:
+          match: true
+          prompt_id: p1024
+          hf: 805
+          ollama: 805
+        greedy_prefix:
+          applicable: true
+          prompt_id: p16
+          n: 16
+          match: false
+          matched_prefix_chars: 4
+          hf_text: A KVM (Key-Value Memory) cache is a type of memory that
+          ollama_text: A KV cache is a data structure that stores frequently accessed data in memory.
+            In
+    q4_K_M:
+      relation: derived_from
+      derived_from: fp16
+      runtimes:
+        ollama:
+          model_id: qwen2.5:0.5b
+          quant: q4_K_M
+          digest: a8b0c51577010a279d933d14c2a8ab4b268079d44c5c8830c0a93900f1827c67
+      evidence:
+        verified_at: '2026-09-15T23:58:54.387604+09:00'
+        captured_by: scripts/capture_model_identity.py@73441b8
+        architecture:
+          match: true
+          compared:
+            num_hidden_layers:
+              hf: 24
+              ollama: 24
+              ollama_field: qwen2.block_count
+              match: true
+            hidden_size:
+              hf: 896
+              ollama: 896
+              ollama_field: qwen2.embedding_length
+              match: true
+            num_attention_heads:
+              hf: 14
+              ollama: 14
+              ollama_field: qwen2.attention.head_count
+              match: true
+            num_key_value_heads:
+              hf: 2
+              ollama: 2
+              ollama_field: qwen2.attention.head_count_kv
+              match: true
+            intermediate_size:
+              hf: 4864
+              ollama: 4864
+              ollama_field: qwen2.feed_forward_length
+              match: true
+            rope_theta:
+              hf: 1000000.0
+              ollama: 1000000
+              ollama_field: qwen2.rope.freq_base
+              match: true
+          unavailable_fields: []
+        tokenization:
+          match: true
+          prompt_id: p1024
+          hf: 805
+          ollama: 805
+        greedy_prefix:
+          applicable: false
+          reason: 양자화 쌍은 출력이 갈라지는 것이 정상
