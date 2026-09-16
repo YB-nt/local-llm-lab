@@ -409,16 +409,37 @@ def write_row(row: dict, csv_path: str, fieldnames: list[str] = FIELDNAMES) -> N
         None
 
     Raises:
-        ValueError: row의 키 개수가 fieldnames와 다를 때.
+        ValueError: row의 키 개수가 fieldnames와 다를 때, 또는 기존 파일의 헤더가
+            fieldnames와 다를 때.
 
     Note:
         - 헤더 중복 방지는 "파일 존재 여부"가 아니라 "파일이 존재하고
           내용이 0바이트보다 큰지"로 판단한다.
+        - 기존 파일이 있으면 첫 줄을 fieldnames와 문자열까지 비교한다. 다른 스키마의
+          헤더(예: bench-memory.sh의 30컬럼 레거시 헤더) 위에 이 스키마의 행을 그냥
+          append하면 컬럼이 밀려 pandas가 에러 없이 조용히 잘못된 값을 읽는다
+          (notes/integration-test-2026-09-16.md에서 실측 재현됨) - 그 조용한 손상을
+          막기 위해 여기서 먼저 큰 소리로 막는다. 비교는 CRLF/LF 어느 쪽으로 쓰인
+          헤더든 허용한다 - bench-memory.sh는 LF로, csv.DictWriter는 기본 CRLF로 쓴다.
     """
     if len(row) != len(fieldnames):
         raise ValueError("Row data has not been filled out properly.")
 
     file_exists = os.path.exists(csv_path) and os.path.getsize(csv_path) > 0
+    if file_exists:
+        expected_header = ",".join(fieldnames)
+        with open(csv_path, "r", encoding="utf-8", newline="") as existing:
+            actual_header = existing.readline().rstrip("\r\n")
+        if actual_header != expected_header:
+            raise ValueError(
+                f"{csv_path}: 기존 헤더가 FIELDNAMES와 다릅니다.\n"
+                f"  기존: {actual_header}\n"
+                f"  기대: {expected_header}\n"
+                "이 파일에 다른 스키마의 헤더가 남아있는 것으로 보입니다 - 이 위에 "
+                "새 행을 이어 쓰면 컬럼이 밀려 조용히 손상됩니다. 파일을 확인해 "
+                "헤더를 바로잡거나, --output으로 새 경로를 지정하세요."
+            )
+
     with open(csv_path, "a", encoding="utf-8", newline="") as file:
         writer = csv.DictWriter(file, fieldnames=fieldnames)
         if not file_exists:

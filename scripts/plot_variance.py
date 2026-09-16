@@ -128,8 +128,17 @@ def assert_metric_comparable(df: pd.DataFrame, metric: str) -> None:
     Note:
         - 데이터가 한 런타임뿐이면 아무 것도 하지 않는다. HF 단독 데이터에는 영향 없음.
         - 차단(ValueError) 대신 경고만 하는 지표도 있다 — CROSS_RUNTIME_UNSAFE의 첫 번째 값.
-        - 이 가드가 필요한 이유: --metric 기본값이 ttft_ms이고 Ollama 행도 cond=baseline
-          이라, 가드가 없으면 기본 호출에서 두 런타임이 조용히 한 그래프에 섞인다.
+        - ⚠ 지금 이 가드는 실전 CLI 경로에서 발동할 일이 없다 (통합 테스트로 확인,
+          notes/integration-test-2026-09-16.md §2). load_filtered_df()가 이보다 먼저
+          --model-id를 정확히 일치하는 단일 값으로 거르는데, HF와 Ollama는 model_id
+          문자열이 절대 겹치지 않는다(예: "Qwen/Qwen2.5-0.5B-Instruct" vs
+          "qwen2.5:0.5b-instruct-fp16") — 그래서 --model-id를 하나 지정하는 순간 이미
+          런타임이 하나로 갈라지고, 여기 도달했을 때 df["runtime"].nunique()는 항상 1이다.
+          "가드가 없으면 조용히 섞인다"는 것은 맞는 말이지만, 지금은 이 가드가 아니라
+          --model-id 필터가 그 역할을 대신 하고 있다는 뜻이다. 이 가드가 실제로 처음
+          도달 가능해지는 시점은 notes/model-identity-spec.md §5(모델 키 하나로 여러
+          model_id를 동시에 조회하는 Phase 2)가 구현될 때다 — 그때 이 함수의 회귀
+          테스트를 반드시 추가할 것.
     """
     if metric not in CROSS_RUNTIME_UNSAFE:
         return
@@ -183,12 +192,6 @@ def load_sessions(df: pd.DataFrame, group_col: str, group_value: str, metric: st
 def color_for(group_value: str, idx: int) -> str:
     if group_value in COND_COLORS:
         return COND_COLORS[group_value]
-    return FALLBACK_COLORS[idx % len(FALLBACK_COLORS)]
-
-
-def color_for(cond: str, idx: int) -> str:
-    if cond in COND_COLORS:
-        return COND_COLORS[cond]
     return FALLBACK_COLORS[idx % len(FALLBACK_COLORS)]
 
 
