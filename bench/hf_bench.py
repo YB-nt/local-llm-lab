@@ -113,7 +113,7 @@ def get_host_label() -> str:
     """CSV의 host 컬럼에 쓸 익명 머신 라벨을 구한다.
 
     Returns:
-        str: 공백·쉼표가 `_`로 치환된 단일 CSV 토큰 (예: "apple-m4-16gb").
+        str: 공백·쉼표가 `_`로 치환된 단일 CSV 토큰 (예: "apple-m2-pro-16gb").
 
     Note:
         - 해석 순서: BENCH_HOST 환경변수 → bench/hostlabel.sh 실행 결과 → "unknown-host".
