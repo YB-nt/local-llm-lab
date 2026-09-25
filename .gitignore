@@ -28,3 +28,7 @@ logs/
 .zed
 .ruff_cache
 .env
+# Claude Code 로컬 설정 (절대경로가 들어가므로 공개 레포에 올리지 않는다)
+.claude/settings.local.json
+# 런타임 산출물 (bench-memory.sh 의 레거시 30컬럼 CSV + 실행 로그)
+benchmarks/
