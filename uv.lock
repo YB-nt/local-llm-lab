@@ -546,10 +546,12 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "accelerate" },
+    { name = "huggingface-hub" },
     { name = "load-dotenv" },
     { name = "loguru" },
     { name = "matplotlib" },
     { name = "pandas" },
+    { name = "pyyaml" },
     { name = "torch" },
     { name = "transformers" },
     { name = "uuid" },
@@ -558,10 +560,12 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "accelerate", specifier = ">=1.14.0" },
+    { name = "huggingface-hub", specifier = ">=0.34" },
     { name = "load-dotenv", specifier = ">=0.1.0" },
     { name = "loguru", specifier = ">=0.7.3" },
     { name = "matplotlib", specifier = ">=3.11.2" },
     { name = "pandas", specifier = ">=3.0.5" },
+    { name = "pyyaml", specifier = ">=6.0" },
     { name = "torch", specifier = ">=2.13.0" },
     { name = "transformers", specifier = ">=5.16.1" },
     { name = "uuid", specifier = ">=1.30" },

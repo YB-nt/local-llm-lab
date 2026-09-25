@@ -91,7 +91,7 @@ Ollama 행도 `cond=baseline`이라 가드가 없으면 기본 호출에서 조�
 
 | 컬럼 | 타입 | 설명 |
 |---|---|---|
-| `host` | string | **익명** 머신 라벨 (예: `apple-m4-16gb`). 실제 hostname을 쓰지 않는다 — 5절 참고 |
+| `host` | string | **익명** 머신 라벨 (예: `apple-m2-pro-16gb`). 실제 hostname을 쓰지 않는다 — 5절 참고 |
 | `os` | string | `uname -s` 결과 |
 | `notes` | string | 이상 케이스, 수동 메모. 스키마 밖 값은 여기에 JSON으로 압축 가능 |
 
@@ -208,7 +208,7 @@ v1에서 "제외"로 잘못 분류했던 걸 바로잡은 것.
 **규약:** 모든 런타임이 `bench/hostlabel.sh` **한 곳**에서 라벨을 얻는다.
 해석 순서는 `BENCH_HOST` 환경변수 → `bench/hostlabel.sh` 실행 결과 → `unknown-host`.
 
-- 라벨 형식: `<chip>-<ram>gb` (예: `apple-m4-16gb`). 공백·쉼표는 `_`로 치환해 CSV 단일 토큰 유지
+- 라벨 형식: `<chip>-<ram>gb` (예: `apple-m2-pro-16gb`). 공백·쉼표는 `_`로 치환해 CSV 단일 토큰 유지
 - 실패 시 **hostname으로 폴백하지 않는다.** 익명화가 조용히 풀리는 것보다 `unknown-host`가 낫다
 - 라벨 생성 로직을 런타임별로 재구현하지 않는다. 값이 미묘하게 달라지면 런타임 간 조인이 깨진다
 - `bench-memory.sh`는 라벨이 빈 문자열이면 **즉시 종료**한다 (과거에 경로 오류로
